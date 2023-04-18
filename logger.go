@@ -10,7 +10,6 @@ import (
 )
 
 type LoggerMiddleware struct {
-	UTC       bool
 	SkipPaths []string
 	Level     logrus.Level
 }
@@ -44,10 +43,6 @@ func (m LoggerMiddleware) Use(r *gin.Engine) {
 			end := time.Now()
 			latency := end.Sub(start)
 
-			if m.UTC {
-				end = end.UTC()
-			}
-
 			msg := "Request"
 			if len(c.Errors) > 0 {
 				msg = c.Errors.String()
@@ -79,9 +74,8 @@ func (m LoggerMiddleware) Use(r *gin.Engine) {
 	r.Use(middleware)
 }
 
-func NewLogger(utc bool, skipPaths []string, level logrus.Level) *LoggerMiddleware {
+func NewLogger(skipPaths []string, level logrus.Level) *LoggerMiddleware {
 	return &LoggerMiddleware{
-		UTC:       utc,
 		SkipPaths: skipPaths,
 		Level:     level,
 	}

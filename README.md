@@ -10,3 +10,35 @@ Then import the validator package into your own code.
 ```
 import "github.com/elvenworks/go-middleware"
 ```
+
+## Usage logger
+Sample code:
+```go
+import (
+	middleware "github.com/elvenworks/go-middleware"
+)
+
+func InitRoutes(httpServer *http.HTTP) {
+	skipPaths := []string{
+		"/docs",
+		"/api/private/v1/healthz",
+		"/metrics",
+	}
+
+	logger := middleware.NewLogger(skipPaths, logs.GetLoggerLevel())
+	logger.Use(httpServer.Router)
+}
+```
+
+## Usage auth_jwt
+Sample code:
+```go
+import (
+	middleware "github.com/elvenworks/go-middleware"
+)
+
+func New() *HTTP {
+	router := gin.New()
+	router.Use(middleware.NewAuthJWT())
+}
+```
