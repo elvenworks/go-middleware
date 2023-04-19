@@ -14,11 +14,12 @@ import "github.com/elvenworks/go-middleware"
 ## Usage logger
 Sample code:
 ```go
+// path: internal/delivery/api/routes.go
 import (
 	middleware "github.com/elvenworks/go-middleware"
 )
 
-func InitRoutes(httpServer *http.HTTP) {
+func InitRoutes() {
 	skipPaths := []string{
 		"/docs",
 		"/api/private/v1/healthz",
