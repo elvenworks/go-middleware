@@ -14,7 +14,6 @@ import "github.com/elvenworks/go-middleware"
 ## Usage logger
 Sample code:
 ```go
-// path: internal/delivery/api/routes.go
 import (
 	middleware "github.com/elvenworks/go-middleware"
 )
@@ -28,6 +27,18 @@ func InitRoutes() {
 
 	logger := middleware.NewLogger(skipPaths, logs.GetLoggerLevel())
 	logger.Use(httpServer.Router)
+}
+```
+## Usage prometheus
+Sample code:
+```go
+import (
+	middleware "github.com/elvenworks/go-middleware"
+)
+
+func InitRoutes() {
+	p := middleware.NewPrometheus("gin")
+	p.Use(httpServer.Router)
 }
 ```
 
