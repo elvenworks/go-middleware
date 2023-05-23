@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"net/http"
 	"strings"
 	"time"
 
@@ -58,15 +57,8 @@ func (m LoggerMiddleware) Use(r *gin.Engine) {
 			})
 			log.Logger.SetLevel(m.Level)
 
-			switch {
-			case c.Writer.Status() >= http.StatusBadRequest && c.Writer.Status() < http.StatusInternalServerError:
-				log.Warn(msg)
-
-			case c.Writer.Status() >= http.StatusInternalServerError:
+			if c.Writer.Status() > 299 {
 				log.Error(msg)
-
-			default:
-				log.Info(msg)
 			}
 		}
 	}
