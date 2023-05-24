@@ -59,6 +59,8 @@ func (m LoggerMiddleware) Use(r *gin.Engine) {
 
 			if c.Writer.Status() > 299 {
 				log.Error(msg)
+			} else {
+				log.Info(msg)
 			}
 		}
 	}
