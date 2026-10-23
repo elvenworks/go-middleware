@@ -44,13 +44,11 @@ Logs one entry per request with method, path, status, latency and client IP. Res
 status above 299 are logged as errors. The level is applied to the standard logrus logger when
 `Use` is called.
 
-## APM labels
+## APM labels (deprecated)
 
-```go
-middleware.SetLabelTransactionAPM(&ctx, &struct{ OrgUid string }{OrgUid: "abc"})
-```
-
-Copies struct fields (or map entries) to labels of the Elastic APM transaction in `ctx`.
+`SetLabelTransactionAPM` does nothing since v1.3.0, when the library dropped its Elastic APM
+dependency. It only exists so v1 callers keep compiling and will be removed in the next major
+version. Put identifiers in structured log fields or OpenTelemetry span attributes instead.
 
 ## Auth JWT (deprecated)
 

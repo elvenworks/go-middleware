@@ -2,7 +2,20 @@
 
 All notable changes to this project are documented here. Versions follow semantic versioning.
 
-## [v1.2.0] - Unreleased
+## [v1.3.0] - Unreleased
+
+### Removed
+
+- The Elastic APM dependency (`go.elastic.co/apm/v2`). Consumers that do not use the agent
+  themselves no longer pull it in.
+
+### Deprecated
+
+- `SetLabelTransactionAPM` is now a no-op kept for source compatibility. Put identifiers in
+  structured log fields or OpenTelemetry span attributes instead. It will be removed in the next
+  major version.
+
+## [v1.2.0] - 2026-10-23
 
 ### Changed
 
