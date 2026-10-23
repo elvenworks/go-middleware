@@ -2,9 +2,12 @@ package middleware
 
 import (
 	"bytes"
-	"io/ioutil"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -15,6 +18,10 @@ import (
 )
 
 var defaultMetricPath = "/metrics"
+
+// UnmatchedRouteLabel is the "url" label value for requests that match no registered route
+// (404s), so arbitrary paths sent by clients cannot create new time series.
+const UnmatchedRouteLabel = "unmatched"
 
 // Standard default metrics
 //
@@ -56,24 +63,36 @@ var standardMetrics = []*Metric{
 
 /*
 RequestCounterURLLabelMappingFn is a function which can be supplied to the middleware to control
-the cardinality of the request counter's "url" label, which might be required in some contexts.
-For instance, if for a "/customer/:name" route you don't want to generate a time series for every
-possible customer name, you could use this function:
+the cardinality of the "url" label of the request counter and the latency histogram.
 
-	func(c *gin.Context) string {
-		url := c.Request.URL.Path
-		for _, p := range c.Params {
-			if p.Key == "name" {
-				url = strings.Replace(url, p.Value, ":name", 1)
-				break
-			}
-		}
-		return url
-	}
-
-which would map "/customer/alice" and "/customer/bob" to their template "/customer/:name".
+The default is RouteTemplateURLLabel, which maps "/customer/alice" and "/customer/bob" to their
+route template "/customer/:name". Every distinct label value becomes a new time series that is
+kept in memory for the lifetime of the process, so the label must never carry IDs or other
+unbounded values. Use RawPathURLLabel only for routers without path parameters.
 */
 type RequestCounterURLLabelMappingFn func(c *gin.Context) string
+
+// RouteTemplateURLLabel labels a request with its gin route template, which keeps the number
+// of time series bounded by the number of routes.
+//
+// Example: GET /api/v1/alerts/42 on route "/api/v1/alerts/:id" returns "/api/v1/alerts/:id";
+// a request that matches no route (404, or 405 when the engine has HandleMethodNotAllowed set)
+// returns UnmatchedRouteLabel.
+func RouteTemplateURLLabel(c *gin.Context) string {
+	if route := c.FullPath(); route != "" {
+		return route
+	}
+	return UnmatchedRouteLabel
+}
+
+// RawPathURLLabel labels a request with its raw URL path, the behavior before v1.2.0.
+// It creates one time series per distinct path, so only use it on routers without path
+// parameters.
+//
+// Example: p := NewPrometheus("gin"); p.ReqCntURLLabelMappingFn = RawPathURLLabel
+func RawPathURLLabel(c *gin.Context) string {
+	return c.Request.URL.Path
+}
 
 // Metric is a definition for the name, description, type, ID, and
 // prometheus.Collector type (i.e. CounterVec, Summary, etc) of each metric
@@ -133,16 +152,12 @@ func NewPrometheus(subsystem string, customMetricsList ...[]*Metric) *Prometheus
 		metricsList = customMetricsList[0]
 	}
 
-	for _, metric := range standardMetrics {
-		metricsList = append(metricsList, metric)
-	}
+	metricsList = append(metricsList, standardMetrics...)
 
 	p := &Prometheus{
-		MetricsList: metricsList,
-		MetricsPath: defaultMetricPath,
-		ReqCntURLLabelMappingFn: func(c *gin.Context) string {
-			return c.Request.URL.Path // i.e. by default do nothing, i.e. return URL as is
-		},
+		MetricsList:             metricsList,
+		MetricsPath:             defaultMetricPath,
+		ReqCntURLLabelMappingFn: RouteTemplateURLLabel,
 	}
 
 	p.registerMetrics(subsystem)
@@ -211,13 +226,20 @@ func (p *Prometheus) runServer() {
 	}
 }
 
-func (p *Prometheus) getMetrics() []byte {
-	response, _ := http.Get(p.Ppg.MetricsURL)
+// pushHTTPClient bounds each push gateway round trip, so a hung endpoint cannot stall the ticker.
+var pushHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
+func (p *Prometheus) getMetrics() ([]byte, error) {
+	response, err := pushHTTPClient.Get(p.Ppg.MetricsURL)
+	if err != nil {
+		return nil, err
+	}
 	defer response.Body.Close()
-	body, _ := ioutil.ReadAll(response.Body)
 
-	return body
+	if response.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("metrics endpoint %q returned status %d, expected 2xx", p.Ppg.MetricsURL, response.StatusCode)
+	}
+	return io.ReadAll(response.Body)
 }
 
 func (p *Prometheus) getPushGatewayURL() string {
@@ -229,18 +251,38 @@ func (p *Prometheus) getPushGatewayURL() string {
 }
 
 func (p *Prometheus) sendMetricsToPushGateway(metrics []byte) {
-	req, err := http.NewRequest("POST", p.getPushGatewayURL(), bytes.NewBuffer(metrics))
-	client := &http.Client{}
-	if _, err = client.Do(req); err != nil {
-		log.WithError(err).Errorln("Error sending to push gateway")
+	req, err := http.NewRequest(http.MethodPost, p.getPushGatewayURL(), bytes.NewBuffer(metrics))
+	if err != nil {
+		log.WithError(err).Errorf("Error building push gateway request for %q", p.Ppg.PushGatewayURL)
+		return
 	}
+	response, err := pushHTTPClient.Do(req)
+	if err != nil {
+		log.WithError(err).Errorln("Error sending to push gateway")
+		return
+	}
+	response.Body.Close()
+	if response.StatusCode/100 != 2 {
+		log.Errorf("Push gateway %q returned status %d, expected 2xx", p.Ppg.PushGatewayURL, response.StatusCode)
+	}
+}
+
+// pushMetrics skips a cycle when the local metrics endpoint is unreachable instead of
+// pushing an empty body or crashing the ticker goroutine.
+func (p *Prometheus) pushMetrics() {
+	metrics, err := p.getMetrics()
+	if err != nil {
+		log.WithError(err).Errorf("Error reading metrics from %q", p.Ppg.MetricsURL)
+		return
+	}
+	p.sendMetricsToPushGateway(metrics)
 }
 
 func (p *Prometheus) startPushTicker() {
 	ticker := time.NewTicker(time.Second * p.Ppg.PushIntervalSeconds)
 	go func() {
 		for range ticker.C {
-			p.sendMetricsToPushGateway(p.getMetrics())
+			p.pushMetrics()
 		}
 	}()
 }
@@ -321,13 +363,29 @@ func NewMetric(m *Metric, subsystem string) prometheus.Collector {
 	return metric
 }
 
+// registerCollector registers metric in the default registry. When an identical collector is
+// already registered (a second NewPrometheus with the same subsystem in the same process), it
+// returns the existing one, so this instance still records into a collector that is exported.
+func registerCollector(metric prometheus.Collector, name string) prometheus.Collector {
+	err := prometheus.Register(metric)
+	if err == nil {
+		return metric
+	}
+	// The registry only compares names and labels, so an unrelated collector with the same name
+	// is reused only when it has the same concrete type; otherwise the type assertions in
+	// registerMetrics would panic at startup.
+	var already prometheus.AlreadyRegisteredError
+	if errors.As(err, &already) && reflect.TypeOf(already.ExistingCollector) == reflect.TypeOf(metric) {
+		return already.ExistingCollector
+	}
+	log.WithError(err).Errorf("%s could not be registered in Prometheus", name)
+	return metric
+}
+
 func (p *Prometheus) registerMetrics(subsystem string) {
 
 	for _, metricDef := range p.MetricsList {
-		metric := NewMetric(metricDef, subsystem)
-		if err := prometheus.Register(metric); err != nil {
-			log.WithError(err).Errorf("%s could not be registered in Prometheus", metricDef.Name)
-		}
+		metric := registerCollector(NewMetric(metricDef, subsystem), metricDef.Name)
 		switch metricDef {
 		case reqCnt:
 			p.reqCnt = metric.(*prometheus.CounterVec)
@@ -371,20 +429,28 @@ func (p *Prometheus) HandlerFunc() gin.HandlerFunc {
 		elapsed := float64(time.Since(start)) / float64(time.Second)
 		resSz := float64(c.Writer.Size())
 
-		url := p.ReqCntURLLabelMappingFn(c)
-		// jlambert Oct 2018 - sidecar specific mod
-		if len(p.URLLabelFromContext) > 0 {
-			u, found := c.Get(p.URLLabelFromContext)
-			if !found {
-				u = "unknown"
-			}
-			url = u.(string)
-		}
+		url := p.urlLabel(c)
 		p.reqDur.WithLabelValues(status, c.Request.Method, url).Observe(elapsed)
 		p.reqCnt.WithLabelValues(status, c.Request.Method, c.HandlerName(), c.Request.Host, url).Inc()
 		p.reqSz.Observe(float64(reqSz))
 		p.resSz.Observe(resSz)
 	}
+}
+
+// urlLabel resolves the "url" label. URLLabelFromContext, when set, takes precedence over
+// ReqCntURLLabelMappingFn; a missing or non-string context value becomes "unknown" instead of
+// panicking inside the request.
+func (p *Prometheus) urlLabel(c *gin.Context) string {
+	if p.URLLabelFromContext == "" {
+		return p.ReqCntURLLabelMappingFn(c)
+	}
+	// jlambert Oct 2018 - sidecar specific mod
+	if u, ok := c.Get(p.URLLabelFromContext); ok {
+		if s, isString := u.(string); isString {
+			return s
+		}
+	}
+	return "unknown"
 }
 
 func prometheusHandler() gin.HandlerFunc {
