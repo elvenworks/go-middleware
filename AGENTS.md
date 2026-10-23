@@ -11,7 +11,7 @@ consumer, so stability matters more than features.
 |---|---|
 | `prometheus.go` | HTTP metrics (`<subsystem>_requests_total`, `_request_duration_seconds`, request/response size) and the `/metrics` endpoint; optional push gateway. |
 | `logger.go` | Access log with logrus; responses with status above 299 are logged as errors. |
-| `apm_labels.go` | Copies struct or map fields to labels of the current Elastic APM transaction. |
+| `apm_labels.go` | **Deprecated.** `SetLabelTransactionAPM` is a no-op kept for v1 source compatibility. |
 | `auth_jwt.go` | **Deprecated.** Decodes Bearer token claims without verifying them. |
 
 ## Commands
