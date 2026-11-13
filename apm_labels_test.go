@@ -3,8 +3,6 @@ package middleware
 import (
 	"context"
 	"testing"
-
-	logtest "github.com/sirupsen/logrus/hooks/test"
 )
 
 type labeledObject struct {
@@ -12,8 +10,7 @@ type labeledObject struct {
 }
 
 func TestSetLabelTransactionAPMIsANoOp(t *testing.T) {
-	hook := logtest.NewGlobal()
-	defer hook.Reset()
+	hook := captureStandardLogger(t)
 
 	ctx := context.Background()
 	var nilPointer *labeledObject

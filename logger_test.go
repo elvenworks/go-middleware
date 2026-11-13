@@ -11,14 +11,24 @@ import (
 	logtest "github.com/sirupsen/logrus/hooks/test"
 )
 
+// captureStandardLogger attaches a test hook to the standard logrus logger as its only hook and
+// returns it. The previous level and hooks are restored when the test ends.
+func captureStandardLogger(t *testing.T) *logtest.Hook {
+	t.Helper()
+	previousLevel := logrus.GetLevel()
+	previousHooks := logrus.StandardLogger().ReplaceHooks(make(logrus.LevelHooks))
+	t.Cleanup(func() {
+		logrus.StandardLogger().ReplaceHooks(previousHooks)
+		logrus.SetLevel(previousLevel)
+	})
+	return logtest.NewGlobal()
+}
+
 // newLoggedRouter instruments a router with the access log and captures the standard logger
-// output in a hook. The previous level is restored when the test ends.
+// output in a hook. The previous level and hooks are restored when the test ends.
 func newLoggedRouter(t *testing.T, skipPaths []string) (*gin.Engine, *logtest.Hook) {
 	t.Helper()
-	previous := logrus.GetLevel()
-	t.Cleanup(func() { logrus.SetLevel(previous) })
-
-	hook := logtest.NewGlobal()
+	hook := captureStandardLogger(t)
 	router := gin.New()
 	NewLogger(skipPaths, logrus.InfoLevel).Use(router)
 	router.GET("/ok", func(c *gin.Context) { c.Status(http.StatusOK) })
@@ -67,9 +77,7 @@ func TestLoggerSkipPathsMatchesRequestURI(t *testing.T) {
 }
 
 func TestLoggerUseAppliesConfiguredLevel(t *testing.T) {
-	previous := logrus.GetLevel()
-	t.Cleanup(func() { logrus.SetLevel(previous) })
-	hook := logtest.NewGlobal()
+	hook := captureStandardLogger(t)
 	router := gin.New()
 
 	NewLogger(nil, logrus.ErrorLevel).Use(router)
