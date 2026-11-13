@@ -43,8 +43,8 @@ middleware.NewLogger(skipPaths, logrus.InfoLevel).Use(router)
 Logs one entry per request with method, path, status, latency and client IP. Responses with
 status above 299 are logged as errors. The values of sensitive query parameters (such as `token`,
 `api_key`, `password` and `signature`) are masked as `REDACTED` in the logged path; use
-`RedactQuery` or `RedactRequestURI` to do the same in your own logger. The level is applied to the standard logrus logger when
-`Use` is called.
+`RedactQuery` or `RedactRequestURI` to do the same in your own logger. The level is applied to
+the standard logrus logger when `Use` is called.
 
 ## APM labels (deprecated)
 
