@@ -16,8 +16,9 @@ All notable changes to this project are documented here. Versions follow semanti
   in the logs. Now the value of these keys is replaced by `REDACTED`: `token`, `access_token`,
   `refresh_token`, `id_token`, `apikey`, `api_key`, `key`, `password`, `secret`,
   `client_secret`, `signature` and `sig`. Keys are matched case-insensitively and after
-  percent-decoding, `&` and `;` both separate parameters, and repeated keys are all masked.
-  `SkipPaths` still compares against the unredacted URI. There is no opt-out.
+  percent-decoding, a parameter can start after `&` or `;`, a masked value runs to the next `&`
+  (so a raw `;` inside it is masked too), and repeated keys are all masked. `SkipPaths` still
+  compares against the unredacted URI. There is no opt-out.
 
 ## [v1.3.0] - 2026-10-23
 

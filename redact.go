@@ -25,43 +25,55 @@ var sensitiveQueryKeys = map[string]struct{}{
 }
 
 // RedactQuery returns rawQuery with the value of every sensitive parameter replaced by
-// "REDACTED". Parts are split on '&' and ';'; separators, order and every non-sensitive byte are
-// preserved. Key matching is case-insensitive and percent-decoded, and applies to repeated keys.
-// A part without '=' has no value and is left unchanged.
+// "REDACTED". A parameter can start after '&' or ';'. The value of a sensitive key runs to the
+// next '&', so a raw ';' inside it is masked too. Key matching is case-insensitive after
+// percent-decoding, and repeated keys are all masked. A part without '=' has no value and is
+// left unchanged. Separators, order and every byte outside a masked value are preserved.
 func RedactQuery(rawQuery string) string {
 	if rawQuery == "" {
 		return ""
 	}
 	var b strings.Builder
 	b.Grow(len(rawQuery))
-	start := 0
-	for i := 0; i <= len(rawQuery); i++ {
-		if i < len(rawQuery) && rawQuery[i] != '&' && rawQuery[i] != ';' {
-			continue
+	for start := 0; start <= len(rawQuery); {
+		end := start
+		for end < len(rawQuery) && rawQuery[end] != '&' && rawQuery[end] != ';' {
+			end++
 		}
-		b.WriteString(redactPart(rawQuery[start:i]))
-		if i < len(rawQuery) {
-			b.WriteByte(rawQuery[i])
+		part := rawQuery[start:end]
+		if key, ok := sensitiveKey(part); ok {
+			// The value of a sensitive key ends only at the next '&': a raw ';' is part of it.
+			if amp := strings.IndexByte(rawQuery[end:], '&'); amp < 0 {
+				end = len(rawQuery)
+			} else {
+				end += amp
+			}
+			b.WriteString(key + "=" + redactedValue)
+		} else {
+			b.WriteString(part)
 		}
-		start = i + 1
+		if end < len(rawQuery) {
+			b.WriteByte(rawQuery[end])
+		}
+		start = end + 1
 	}
 	return b.String()
 }
 
-func redactPart(part string) string {
+// sensitiveKey reports whether part is a "key=value" pair whose key is sensitive, and returns the
+// key as written in part.
+func sensitiveKey(part string) (rawKey string, ok bool) {
 	eq := strings.IndexByte(part, '=')
 	if eq < 0 {
-		return part
+		return "", false
 	}
-	key := part[:eq]
-	name, err := url.QueryUnescape(key)
+	rawKey = part[:eq]
+	name, err := url.QueryUnescape(rawKey)
 	if err != nil {
-		name = key
+		name = rawKey
 	}
-	if _, ok := sensitiveQueryKeys[strings.ToLower(name)]; ok {
-		return key + "=" + redactedValue
-	}
-	return part
+	_, ok = sensitiveQueryKeys[strings.ToLower(name)]
+	return rawKey, ok
 }
 
 // RedactRequestURI returns u.RequestURI() with the values of sensitive query parameters
