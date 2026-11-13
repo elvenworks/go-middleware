@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here. Versions follow semantic versioning.
 
+## [v1.4.0] - 2026-11-13
+
+### Added
+
+- `RedactQuery` and `RedactRequestURI`, so applications with their own logger can mask sensitive
+  query values the same way as the access log.
+
+### Security
+
+- **The access log `path` field now masks sensitive query values.** Previously the raw request
+  URI was logged, so a credential sent in the query string (for example `?token=...`) ended up
+  in the logs. Now the value of these keys is replaced by `REDACTED`: `token`, `access_token`,
+  `refresh_token`, `id_token`, `apikey`, `api_key`, `key`, `password`, `secret`,
+  `client_secret`, `signature` and `sig`. Keys are matched case-insensitively and after
+  percent-decoding, `&` and `;` both separate parameters, and repeated keys are all masked.
+  `SkipPaths` still compares against the unredacted URI. There is no opt-out.
+
 ## [v1.3.0] - 2026-10-23
 
 ### Removed
