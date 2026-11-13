@@ -22,17 +22,18 @@ func (m LoggerMiddleware) Use(r *gin.Engine) {
 
 	r.Use(func(c *gin.Context) {
 		start := time.Now()
-		path := c.Request.URL.Path
-		// shouldSkip keeps matching the raw URI; only the logged value is redacted.
-		url := c.Request.URL.RequestURI()
-		logged := RedactRequestURI(c.Request.URL)
+		// Copy the URL before c.Next(): a handler may mutate c.Request.URL, and the log must
+		// describe the request as received. Building and redacting the URI waits until the
+		// skip check, so skipped requests (health checks, metrics) pay only for the copy.
+		received := *c.Request.URL
 
 		c.Next()
 
-		if m.shouldSkip(path, url) {
+		// shouldSkip keeps matching the raw URI; only the logged value is redacted.
+		if m.shouldSkip(received.Path, received.RequestURI()) {
 			return
 		}
-		m.logRequest(c, logged, time.Since(start))
+		m.logRequest(c, RedactRequestURI(&received), time.Since(start))
 	})
 }
 

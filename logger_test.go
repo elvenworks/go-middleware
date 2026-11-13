@@ -140,6 +140,39 @@ func TestLoggerRedactsOnErrorStatus(t *testing.T) {
 	}
 }
 
+func TestLoggerLogsRequestAsReceived(t *testing.T) {
+	router, hook := newLoggedRouter(t, nil)
+	router.GET("/rewrite", func(c *gin.Context) {
+		c.Request.URL.Path = "/rewritten"
+		c.Request.URL.RawQuery = "token=other-fake"
+		c.Status(http.StatusOK)
+	})
+
+	doRequest(router, "/rewrite?token=s3cr3t-fake&orgUid=o1")
+
+	entries := hook.AllEntries()
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d, want 1", len(entries))
+	}
+	if got := entries[0].Data["path"]; got != "/rewrite?token=REDACTED&orgUid=o1" {
+		t.Fatalf("path field = %v, want the received URI, redacted", got)
+	}
+}
+
+func TestLoggerSkipUsesRequestAsReceived(t *testing.T) {
+	router, hook := newLoggedRouter(t, []string{"/healthz"})
+	router.GET("/healthz/rewrite", func(c *gin.Context) {
+		c.Request.URL.Path = "/elsewhere"
+		c.Status(http.StatusOK)
+	})
+
+	doRequest(router, "/healthz/rewrite")
+
+	if n := len(hook.AllEntries()); n != 0 {
+		t.Fatalf("skipped path rewritten by the handler produced %d entries, want 0", n)
+	}
+}
+
 func TestLoggerKeepsQueryWithoutSecrets(t *testing.T) {
 	router, hook := newLoggedRouter(t, nil)
 
