@@ -15,6 +15,11 @@ var redactQueryCases = []struct {
 	{"token first", "token=abc&orgUid=o1", "token=REDACTED&orgUid=o1"},
 	{"upper case key", "orgUid=o1&TOKEN=abc", "orgUid=o1&TOKEN=REDACTED"},
 	{"percent-encoded key", "%74oken=abc", "%74oken=REDACTED"},
+	{"hex letter escape in key", "t%6Fken=abc", "t%6Fken=REDACTED"},
+	{"escape and upper case in key", "%54OKEN=abc", "%54OKEN=REDACTED"},
+	{"plus in key is a space", "tok+en=abc&token+=abc", "tok+en=abc&token+=abc"},
+	{"value starting with equals", "token==abc", "token=REDACTED"},
+	{"hash kept in raw query", "x=1#&token=abc", "x=1#&token=REDACTED"},
 	{"repeated key", "token=a&token=b", "token=REDACTED&token=REDACTED"},
 	{"semicolon separator", "a=1;token=x", "a=1;token=REDACTED"},
 	{"semicolon inside value", "token=a;b&x=1", "token=REDACTED&x=1"},
@@ -58,9 +63,11 @@ func TestRedactRequestURI(t *testing.T) {
 		{"/ok?token=abc&x=1", "/ok?token=REDACTED&x=1"},
 		{"/ok", "/ok"},
 		{"/a%2Fb?token=x", "/a%2Fb?token=REDACTED"},
+		{"http://h/ok?token=x", "/ok?token=REDACTED"},
 	}
 	for _, tc := range cases {
-		u, err := url.Parse(tc.in)
+		// net/http parses the request target of a server request with url.ParseRequestURI.
+		u, err := url.ParseRequestURI(tc.in)
 		if err != nil {
 			t.Fatal(err)
 		}
