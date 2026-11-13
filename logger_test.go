@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -20,6 +22,7 @@ func newLoggedRouter(t *testing.T, skipPaths []string) (*gin.Engine, *logtest.Ho
 	router := gin.New()
 	NewLogger(skipPaths, logrus.InfoLevel).Use(router)
 	router.GET("/ok", func(c *gin.Context) { c.Status(http.StatusOK) })
+	router.GET("/bad", func(c *gin.Context) { c.Status(http.StatusBadRequest) })
 	router.GET("/healthz", func(c *gin.Context) { c.Status(http.StatusOK) })
 	return router, hook
 }
@@ -90,5 +93,55 @@ func TestLoggerSetsLevelOnceAtRegistration(t *testing.T) {
 
 	if got := logrus.GetLevel(); got != logrus.WarnLevel {
 		t.Fatalf("level after request = %v, want warning (requests must not reset it)", got)
+	}
+}
+
+func TestLoggerRedactsSensitiveQuery(t *testing.T) {
+	router, hook := newLoggedRouter(t, nil)
+
+	doRequest(router, "/ok?token=s3cr3t-fake&orgUid=o1")
+
+	entries := hook.AllEntries()
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d, want 1", len(entries))
+	}
+	if got := entries[0].Data["path"]; got != "/ok?token=REDACTED&orgUid=o1" {
+		t.Fatalf("path field = %v, want redacted query", got)
+	}
+	for _, e := range entries {
+		if strings.Contains(fmt.Sprint(e.Data), "s3cr3t-fake") || strings.Contains(e.Message, "s3cr3t-fake") {
+			t.Fatalf("log entry leaks the secret: %v %q", e.Data, e.Message)
+		}
+	}
+}
+
+func TestLoggerRedactsOnErrorStatus(t *testing.T) {
+	router, hook := newLoggedRouter(t, nil)
+
+	doRequest(router, "/bad?token=s3cr3t-fake")
+
+	entries := hook.AllEntries()
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d, want 1", len(entries))
+	}
+	if entries[0].Level != logrus.ErrorLevel {
+		t.Fatalf("level = %v, want error", entries[0].Level)
+	}
+	if got := entries[0].Data["path"]; got != "/bad?token=REDACTED" {
+		t.Fatalf("path field = %v, want redacted query", got)
+	}
+}
+
+func TestLoggerKeepsQueryWithoutSecrets(t *testing.T) {
+	router, hook := newLoggedRouter(t, nil)
+
+	doRequest(router, "/ok?page=2&size=10")
+
+	entries := hook.AllEntries()
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d, want 1", len(entries))
+	}
+	if got := entries[0].Data["path"]; got != "/ok?page=2&size=10" {
+		t.Fatalf("path field = %v, want unchanged query", got)
 	}
 }

@@ -23,14 +23,16 @@ func (m LoggerMiddleware) Use(r *gin.Engine) {
 	r.Use(func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
+		// shouldSkip keeps matching the raw URI; only the logged value is redacted.
 		url := c.Request.URL.RequestURI()
+		logged := RedactRequestURI(c.Request.URL)
 
 		c.Next()
 
 		if m.shouldSkip(path, url) {
 			return
 		}
-		m.logRequest(c, url, time.Since(start))
+		m.logRequest(c, logged, time.Since(start))
 	})
 }
 
